@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tablica Odjazdów ZKM Elbląg - Przystanek 79</title>
+
+  <!-- Cyfrowa czcionka LED -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #050505;
+      color: #ff9900; /* Pomarańczowe diody LED */
+      font-family: 'VT323', monospace;
+      padding: 15px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      /* Efekt linii matrycy ekranu LED */
+      background-image: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.3) 50%);
+      background-size: 100% 4px;
+    }
+
+    .led-text {
+      text-shadow: 0 0 4px rgba(255, 153, 0, 0.8), 0 0 8px rgba(255, 153, 0, 0.4);
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px double #ff9900;
+      padding-bottom: 8px;
+      margin-bottom: 15px;
+      font-size: 1.5rem;
+    }
+
+    .stop-title {
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+
+    .board-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 1.8rem;
+      letter-spacing: 1px;
+    }
+
+    .board-table th {
+      text-align: left;
+      border-bottom: 1px solid #ff9900;
+      padding-bottom: 6px;
+      color: #ffaa00;
+      font-size: 1.4rem;
+    }
+
+    .board-table td {
+      padding: 10px 0;
+      border-bottom: 1px rgba(255, 153, 0, 0.1) dashed;
+    }
+
+    .col-line {
+      width: 15%;
+      font-weight: bold;
+    }
+
+    .col-dest {
+      width: 55%;
+      text-transform: uppercase;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .col-time {
+      width: 30%;
+      text-align: right;
+    }
+
+    .status-msg {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 1.5rem;
+      opacity: 0.8;
+    }
+
+    /* Miganie dla najbliższych odjazdów (np. poniżej 3 min) */
+    .blink {
+      animation: blinker 1s linear infinite;
+    }
+
+    @keyframes blinker {
+      50% { opacity: 0.2; }
+    }
+  </style>
+</head>
+<body class="led-text">
+
+  <header>
+    <div class="stop-title">PRZYSTANEK #79</div>
+    <div id="clock">00:00:00</div>
+  </header>
+
+  <table class="board-table">
+    <thead>
+      <tr>
+        <th class="col-line">LINIA</th>
+        <th class="col-dest">KIERUNEK</th>
+        <th class="col-time">ODJAZD</th>
+      </tr>
+    </thead>
+    <tbody id="departures-list">
+      <tr>
+        <td colspan="3" class="status-msg">Łączenie z ZKM Elbląg...</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <script>
+    const STOP_ID = 79;
+    // Używamy CORS proxy, aby przeglądarka nie blokowała zapytania
+    const TARGET_URL = `https://rozklad.zkm.elblag.pl/Home/GetTimeTableReal?stopId=${STOP_ID}`;
+    const PROXY_URL = `https://corsproxy.io/?${encodeURIComponent(TARGET_URL)}`;
+
+    // Zegar w czasie rzeczywistym
+    function updateClock() {
+      const now = new Date();
+      const h = String(now.getHours()).padStart(2, '0');
+      const m = String(now.getMinutes()).padStart(2, '0');
+      const s = String(now.getSeconds()).padStart(2, '0');
+      document.getElementById('clock').innerText = `${h}:${m}:${s}`;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // Pobieranie danych odjazdów
+    async function fetchDepartures() {
+      const listElement = document.getElementById('departures-list');
+
+      try {
+        const response = await fetch(PROXY_URL);
+        if (!response.ok) throw new Error('Błąd połączenia z serwerem ZKM');
+        
+        const data = await response.json();
+
+        // Obsługa różnej struktury danych (tablica lub obiekt z polem)
+        const departures = Array.isArray(data) ? data : (data.departures || data.TimeTableReal || []);
+
+        if (departures.length === 0) {
+          listElement.innerHTML = `<tr><td colspan="3" class="status-msg">Brak planowanych odjazdów</td></tr>`;
+          return;
+        }
+
+        listElement.innerHTML = ''; // Wyczyszczenie informacji o ładowaniu
+
+        departures.forEach(item => {
+          const row = document.createElement('tr');
+
+          // Pobranie danych z odpowiedzi JSON
+          const line = item.LineName || item.line || item.Line || '?';
+          const direction = item.Direction || item.direction || item.Kierunek || 'Nieznany';
+          const time = item.Time || item.time || item.Czas || '';
+
+          // Określenie, czy czas ma migać (np. "1 min" lub "2 min")
+          const isBlinking = typeof time === 'string' && (time.includes('min') && parseInt(time) <= 2 || time === '0 min');
+          const timeClass = isBlinking ? 'col-time blink' : 'col-time';
+
+          row.innerHTML = `
+            <td class="col-line">${line}</td>
+            <td class="col-dest">${direction}</td>
+            <td class="${timeClass}">${time}</td>
+          `;
+          listElement.appendChild(row);
+        });
+
+      } catch (error) {
+        console.error('Błąd:', error);
+        listElement.innerHTML = `<tr><td colspan="3" class="status-msg" style="color: #ff3333;">Błąd pobierania danych</td></tr>`;
+      }
+    }
+
+    // Pobierz dane od razu, a potem odświeżaj co 15 sekund
+    fetchDepartures();
+    setInterval(fetchDepartures, 15000);
+  </script>
+</body>
+</html>
